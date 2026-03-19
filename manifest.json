@@ -1,0 +1,27 @@
+{
+  "name": "Quick Heat Loss Sketch",
+  "short_name": "Heat Loss",
+  "description": "Sketch a house outline and get a fast whole-house heat loss estimate",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#1a56db",
+  "orientation": "any",
+  "lang": "en-GB",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

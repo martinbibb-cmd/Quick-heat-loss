@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="Sketch a house outline and get a fast whole-house heat loss estimate">
+  <meta name="theme-color" content="#1a56db">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Heat Loss">
+  <title>Quick Heat Loss Sketch</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-left">
+      <span class="app-icon" aria-hidden="true">🏠</span>
+      <h1>Quick Heat Loss Sketch</h1>
+    </div>
+    <button class="help-btn" id="helpBtn" aria-label="Help and instructions">?</button>
+  </header>
+
+  <!-- Help overlay -->
+  <div class="overlay" id="helpOverlay" role="dialog" aria-modal="true" aria-label="Instructions" hidden>
+    <div class="overlay-card">
+      <h2>How to use</h2>
+      <ol>
+        <li><strong>Draw</strong> the house perimeter — click or tap corner points on the canvas</li>
+        <li><strong>Close</strong> the shape by clicking the green first point, or press <em>Close Shape</em></li>
+        <li><strong>Drag</strong> any corner point to adjust after closing</li>
+        <li><strong>Set</strong> building details in the panel — results update instantly</li>
+      </ol>
+      <p class="help-tip">💡 Scroll wheel or pinch to zoom · Middle-mouse / Alt-drag to pan</p>
+      <button class="btn btn-primary" id="helpCloseBtn">Got it</button>
+    </div>
+  </div>
+
+  <main class="app-main">
+
+    <!-- ── Drawing canvas ── -->
+    <section class="canvas-section" aria-label="House perimeter drawing canvas">
+      <div class="canvas-wrapper" id="canvasWrapper">
+        <canvas id="drawingCanvas" aria-label="Drawing area"></canvas>
+        <div class="canvas-hint" id="canvasHint" aria-live="polite">
+          Click to place first corner point
+        </div>
+      </div>
+      <div class="canvas-toolbar" role="toolbar" aria-label="Drawing tools">
+        <button class="btn btn-secondary" id="undoBtn" disabled title="Undo last point (Ctrl+Z)">↩ Undo</button>
+        <button class="btn btn-secondary" id="closeShapeBtn" disabled title="Close the polygon">⬡ Close Shape</button>
+        <button class="btn btn-danger" id="clearBtn" title="Clear and start over">✕ Clear</button>
+        <div class="zoom-controls" aria-label="Zoom controls">
+          <button class="btn btn-icon" id="zoomOutBtn" aria-label="Zoom out" title="Zoom out">−</button>
+          <button class="btn btn-icon" id="zoomFitBtn" aria-label="Fit drawing to view" title="Fit to view">⊡</button>
+          <button class="btn btn-icon" id="zoomInBtn" aria-label="Zoom in" title="Zoom in">+</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Sidebar ── -->
+    <aside class="sidebar" aria-label="Building settings and results">
+
+      <!-- Building -->
+      <section class="panel" aria-labelledby="buildingHeading">
+        <h2 id="buildingHeading" class="panel-heading">Building</h2>
+
+        <div class="field-group">
+          <label>Storeys</label>
+          <div class="btn-group" id="storeysGroup" role="group" aria-label="Number of storeys">
+            <button class="choice-btn" data-value="1">1</button>
+            <button class="choice-btn active" data-value="2">2</button>
+            <button class="choice-btn" data-value="3">3</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="ceilingHeight">Ceiling height</label>
+          <div class="input-with-unit">
+            <input type="number" id="ceilingHeight" value="2.4" min="2.0" max="4.0" step="0.1" aria-label="Ceiling height in metres">
+            <span class="unit">m</span>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="dwellingType">Dwelling type</label>
+          <select id="dwellingType" aria-label="Dwelling type">
+            <option value="detached">Detached</option>
+            <option value="semi" selected>Semi-detached</option>
+            <option value="endTerrace">End terrace</option>
+            <option value="midTerrace">Mid terrace</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- Fabric -->
+      <section class="panel" aria-labelledby="fabricHeading">
+        <h2 id="fabricHeading" class="panel-heading">Fabric</h2>
+
+        <div class="field-group">
+          <label for="wallType">Wall construction</label>
+          <select id="wallType" aria-label="Wall construction type">
+            <option value="solidBrick">Solid brick (pre-1930)</option>
+            <option value="cavityUninsulated" selected>Cavity, uninsulated (1930–2000)</option>
+            <option value="cavityPartialFill">Cavity, partial-fill insulation</option>
+            <option value="cavityFullFill">Cavity, full-fill insulation</option>
+            <option value="timberFrame">Timber frame (modern)</option>
+            <option value="solidStone">Solid stone</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label for="loftInsulation">Loft insulation</label>
+          <select id="loftInsulation" aria-label="Loft insulation level">
+            <option value="none">None</option>
+            <option value="mm100">100 mm</option>
+            <option value="mm200">200 mm</option>
+            <option value="mm270plus" selected>270 mm+ (recommended)</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label for="glazingType">Glazing type</label>
+          <select id="glazingType" aria-label="Glazing type">
+            <option value="single">Single glazed</option>
+            <option value="doubleOld">Double, pre-2002</option>
+            <option value="doubleArated" selected>Double, A-rated</option>
+            <option value="triple">Triple glazed</option>
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>Window area</label>
+          <div class="btn-group" id="glazingAmountGroup" role="group" aria-label="Window area as proportion of wall">
+            <button class="choice-btn" data-value="low">Low<br><small>12%</small></button>
+            <button class="choice-btn active" data-value="medium">Med<br><small>18%</small></button>
+            <button class="choice-btn" data-value="high">High<br><small>25%</small></button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label for="floorType">Ground floor</label>
+          <select id="floorType" aria-label="Ground floor construction">
+            <option value="solidUninsulated">Solid concrete, uninsulated</option>
+            <option value="suspendedUninsulated" selected>Suspended timber, uninsulated</option>
+            <option value="insulated">Insulated (modern)</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- Results -->
+      <section class="panel results-panel" id="resultsPanel" aria-labelledby="resultsHeading">
+        <h2 id="resultsHeading" class="panel-heading">Results</h2>
+
+        <div class="results-placeholder" id="resultsPlaceholder" aria-live="polite">
+          <span>Draw the house outline to see results</span>
+        </div>
+
+        <div class="results-content" id="resultsContent" hidden>
+          <div class="geometry-results" aria-label="Geometry results">
+            <div class="result-row">
+              <span class="result-label">Floor area</span>
+              <span class="result-value" id="resFloorArea">—</span>
+              <span class="result-unit">m²</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Perimeter</span>
+              <span class="result-value" id="resPerimeter">—</span>
+              <span class="result-unit">m</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Exposed wall area</span>
+              <span class="result-value" id="resWallArea">—</span>
+              <span class="result-unit">m²</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Glazing area</span>
+              <span class="result-value" id="resGlazingArea">—</span>
+              <span class="result-unit">m²</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Roof / ceiling area</span>
+              <span class="result-value" id="resRoofArea">—</span>
+              <span class="result-unit">m²</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Internal volume</span>
+              <span class="result-value" id="resVolume">—</span>
+              <span class="result-unit">m³</span>
+            </div>
+          </div>
+
+          <div class="heat-loss-display" aria-label="Estimated heat loss">
+            <div class="heat-loss-value">
+              <span id="resHeatLoss">—</span><span class="heat-loss-unit">kW</span>
+            </div>
+            <div class="heat-loss-label">design heat loss</div>
+            <div class="heat-loss-note">at ΔT = 20 °C (indoor 21 °C / outdoor 1 °C)</div>
+          </div>
+
+          <details class="breakdown-details">
+            <summary>Heat loss breakdown</summary>
+            <table class="breakdown-table" aria-label="Heat loss breakdown by element">
+              <tbody>
+                <tr><td>Walls</td><td id="resWallHL">—</td><td>kW</td></tr>
+                <tr><td>Glazing</td><td id="resGlazingHL">—</td><td>kW</td></tr>
+                <tr><td>Roof / loft</td><td id="resRoofHL">—</td><td>kW</td></tr>
+                <tr><td>Floor</td><td id="resFloorHL">—</td><td>kW</td></tr>
+                <tr><td>Ventilation</td><td id="resVentHL">—</td><td>kW</td></tr>
+              </tbody>
+            </table>
+          </details>
+
+          <p class="confidence-note">
+            ± 25–40 % first-pass estimate. Shell model only — use for early-stage sizing.
+          </p>
+        </div>
+      </section>
+
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
