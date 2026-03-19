@@ -40,13 +40,7 @@ const U_FLOOR = {
 // Glazing as fraction of gross exposed wall area
 const GLAZING_FRACTION = { low: 0.12, medium: 0.18, high: 0.25 };
 
-// Fraction of total perimeter wall area that is externally exposed
-const EXPOSURE_FACTOR = {
-  detached:   1.00,
-  semi:       0.75,
-  endTerrace: 0.75,
-  midTerrace: 0.50,
-};
+const PARTY_WALL_FACTOR = 0.1; // residual heat loss through party walls
 
 const DELTA_T = 20;  // °C design temperature difference
 const ACH     = 0.75; // air changes per hour (typical UK existing dwelling)
@@ -64,6 +58,9 @@ const state = {
   scale:  40,   // CSS pixels per metre
   panX:  -2,    // world X at left edge
   panY:  -2,    // world Y at top edge
+
+  // Party walls: one entry per edge (edge i → points[i] to points[(i+1)%n])
+  edges: [],  // [{ isPartyWall: boolean }]
 
   // Interaction
   isPanning:       false,
@@ -129,6 +126,67 @@ function snap(wx, wy) {
     x: Math.round(wx / SNAP) * SNAP,
     y: Math.round(wy / SNAP) * SNAP,
   };
+}
+
+// ── Edge helpers ──────────────────────────────────────────────────────────────
+/**
+ * Perpendicular distance from point (px, py) to segment (ax,ay)-(bx,by).
+ */
+function pointToSegmentDistance(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+/**
+ * Returns the index of the edge closest to (clientX, clientY) within a
+ * fixed pixel threshold, or -1 if none is close enough.
+ */
+function getEdgeIndexAtClient(clientX, clientY) {
+  if (!state.closed) return -1;
+  const rect = canvas.getBoundingClientRect();
+  const cx = clientX - rect.left;
+  const cy = clientY - rect.top;
+  const thresholdPx = 12;
+  let best = -1, bestDist = thresholdPx;
+  const pts = state.points;
+  for (let i = 0; i < pts.length; i++) {
+    const a = w2c(pts[i].x, pts[i].y);
+    const b = w2c(pts[(i + 1) % pts.length].x, pts[(i + 1) % pts.length].y);
+    const d = pointToSegmentDistance(cx, cy, a.x, a.y, b.x, b.y);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return best;
+}
+
+/**
+ * Auto-assign party walls based on dwelling type.
+ * Longest edge(s) are made party walls for semi/end-terrace/mid-terrace.
+ */
+function applyDefaultExposure() {
+  const edges = state.edges;
+  if (edges.length === 0) return;
+  edges.forEach(e => { e.isPartyWall = false; });
+
+  const type = state.dwellingType;
+  if (type === 'detached') return;
+
+  const pts = state.points;
+  const sorted = edges
+    .map((e, i) => {
+      const next = pts[(i + 1) % pts.length];
+      return { i, length: Math.hypot(next.x - pts[i].x, next.y - pts[i].y) };
+    })
+    .sort((a, b) => b.length - a.length);
+
+  if (type === 'semi' || type === 'endTerrace') {
+    edges[sorted[0].i].isPartyWall = true;
+  } else if (type === 'midTerrace') {
+    edges[sorted[0].i].isPartyWall = true;
+    if (sorted.length > 1) edges[sorted[1].i].isPartyWall = true;
+  }
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -224,23 +282,47 @@ function drawPolygon() {
   const pts = state.points;
   if (pts.length < 2) return;
 
-  ctx.beginPath();
-  const s = w2c(pts[0].x, pts[0].y);
-  ctx.moveTo(s.x, s.y);
-  for (let i = 1; i < pts.length; i++) {
-    const p = w2c(pts[i].x, pts[i].y);
-    ctx.lineTo(p.x, p.y);
-  }
-
   if (state.closed) {
+    // Fill
+    ctx.beginPath();
+    const s = w2c(pts[0].x, pts[0].y);
+    ctx.moveTo(s.x, s.y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = w2c(pts[i].x, pts[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
     ctx.closePath();
     ctx.fillStyle = 'rgba(26, 86, 219, 0.10)';
     ctx.fill();
-    ctx.strokeStyle = '#1a56db';
-    ctx.lineWidth   = 2.5;
+
+    // Draw each edge with party-wall-aware styling
+    for (let i = 0; i < pts.length; i++) {
+      const a = w2c(pts[i].x, pts[i].y);
+      const b = w2c(pts[(i + 1) % pts.length].x, pts[(i + 1) % pts.length].y);
+      const isParty = state.edges[i] && state.edges[i].isPartyWall;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      if (isParty) {
+        ctx.strokeStyle = '#888888';
+        ctx.setLineDash([6, 4]);
+      } else {
+        ctx.strokeStyle = '#1a56db';
+        ctx.setLineDash([]);
+      }
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
     ctx.setLineDash([]);
-    ctx.stroke();
   } else {
+    // Open polygon: draw preview with dashed line to cursor
+    ctx.beginPath();
+    const s0 = w2c(pts[0].x, pts[0].y);
+    ctx.moveTo(s0.x, s0.y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = w2c(pts[i].x, pts[i].y);
+      ctx.lineTo(p.x, p.y);
+    }
     // Live preview to cursor
     if (state.hoverPt) {
       const hp = w2c(state.hoverPt.x, state.hoverPt.y);
@@ -428,6 +510,13 @@ function onPointerDown(e) {
         return;
       }
     }
+    // Toggle party wall on edge click
+    const edgeIdx = getEdgeIndexAtClient(pos.x, pos.y);
+    if (edgeIdx >= 0) {
+      state.edges[edgeIdx].isPartyWall = !state.edges[edgeIdx].isPartyWall;
+      updateResults();
+      render();
+    }
     return;
   }
 
@@ -557,6 +646,8 @@ canvas.addEventListener('contextmenu', e => {
 // ── Polygon operations ────────────────────────────────────────────────────────
 function closePolygon() {
   if (state.points.length < 3) return;
+  state.edges   = state.points.map(() => ({ isPartyWall: false }));
+  applyDefaultExposure();
   state.closed  = true;
   state.hoverPt = null;
   updateButtons();
@@ -568,6 +659,7 @@ function closePolygon() {
 function undoLastPoint() {
   if (state.closed) {
     state.closed = false;
+    state.edges  = [];
     updateResults();
   } else if (state.points.length > 0) {
     state.points.pop();
@@ -582,6 +674,7 @@ function clearAll() {
   state.closed    = false;
   state.hoverPt   = null;
   state.dragIndex = -1;
+  state.edges     = [];
   updateButtons();
   updateHint();
   clearResults();
@@ -647,8 +740,21 @@ function calculateHeatLoss() {
   const totalHeight = state.storeys * state.ceilingHeight;
   const volume      = floorArea * totalHeight;
 
-  const exposureFactor = EXPOSURE_FACTOR[state.dwellingType];
-  const grossWallArea  = perimeter * totalHeight * exposureFactor;
+  // Compute exposed and party perimeters from edge flags
+  let exposedPerimeter = 0;
+  let partyPerimeter   = 0;
+  state.edges.forEach((edge, i) => {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (edge.isPartyWall) {
+      partyPerimeter += len;
+    } else {
+      exposedPerimeter += len;
+    }
+  });
+
+  const grossWallArea  = exposedPerimeter * totalHeight;
   const glazingFrac    = GLAZING_FRACTION[state.glazingAmount];
   const glazingArea    = grossWallArea * glazingFrac;
   const netWallArea    = grossWallArea - glazingArea;
@@ -659,7 +765,9 @@ function calculateHeatLoss() {
   const uGlazing = U_GLAZING[state.glazingType];
   const uFloor   = U_FLOOR[state.floorType];
 
-  const wallHL    = netWallArea * uWall    * DELTA_T;
+  // Exposed wall + small residual through party walls
+  const partyWallArea = partyPerimeter * totalHeight;
+  const wallHL    = (netWallArea * uWall + partyWallArea * uWall * PARTY_WALL_FACTOR) * DELTA_T;
   const glazingHL = glazingArea * uGlazing * DELTA_T;
   const roofHL    = roofArea    * uLoft    * DELTA_T;
   const floorHL   = floorArea   * uFloor   * DELTA_T;
@@ -691,9 +799,8 @@ function updateButtons() {
 function updateHint() {
   const hint = document.getElementById('canvasHint');
   if (state.closed) {
-    hint.textContent = 'Shape closed — drag corner points to adjust';
+    hint.textContent = 'Click or tap walls to mark as party walls · Drag corners to adjust';
     hint.classList.remove('hidden');
-    setTimeout(() => hint.classList.add('hidden'), 2200);
   } else if (state.points.length === 0) {
     hint.textContent = 'Click to place first corner point';
     hint.classList.remove('hidden');
@@ -789,13 +896,22 @@ document.getElementById('ceilingHeight').addEventListener('input', function () {
   if (v >= 2.0 && v <= 4.0) { state.ceilingHeight = v; updateResults(); }
 });
 
-['wallType', 'loftInsulation', 'glazingType', 'dwellingType', 'floorType']
+['wallType', 'loftInsulation', 'glazingType', 'floorType']
   .forEach(id => {
     document.getElementById(id).addEventListener('change', function () {
       state[id] = this.value;
       updateResults();
     });
   });
+
+document.getElementById('dwellingType').addEventListener('change', function () {
+  state.dwellingType = this.value;
+  if (state.closed && state.edges.length > 0) {
+    applyDefaultExposure();
+    render();
+  }
+  updateResults();
+});
 
 // ── Initialise ────────────────────────────────────────────────────────────────
 const resizeObserver = new ResizeObserver(resizeCanvas);
