@@ -1,0 +1,4 @@
+# Dependencies / build artefacts — nothing here for this project yet
+# (pure static files, no build step)
+.DS_Store
+Thumbs.db

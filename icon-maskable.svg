@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- Maskable icon: safe zone is inner 80% (approx 38px padding each side) -->
+  <rect width="192" height="192" fill="#1a56db"/>
+  <!-- House outline (scaled down to fit safe zone) -->
+  <polygon points="96,44 152,86 152,154 40,154 40,86" fill="none" stroke="#fff" stroke-width="6" stroke-linejoin="round"/>
+  <line x1="96" y1="86" x2="96" y2="154" stroke="#fff" stroke-width="3.5" stroke-dasharray="7,5" opacity="0.7"/>
+  <line x1="40" y1="122" x2="152" y2="122" stroke="#fff" stroke-width="3.5" stroke-dasharray="7,5" opacity="0.7"/>
+  <text x="96" y="108" text-anchor="middle" fill="#fff" font-family="system-ui,-apple-system,sans-serif" font-size="22" font-weight="700">kW</text>
+</svg>
