@@ -796,10 +796,12 @@ function r(v, dp) {
   return Math.round(v * m) / m;
 }
 
-// TODO: future PR will aggregate across multiple non-reference layers
+// TODO (future PR): proper multi-layer aggregation logic, overlap handling between
+// layers, and level-aware exposed wall calculations.
 function calculateHeatLoss() {
   const layer = getActiveLayer();
-  // Only visible, non-reference, closed layers are eligible for calculation
+  // Only visible, non-reference, closed layers are eligible for calculation.
+  // If no eligible layer is active, returns null and the results panel shows the placeholder.
   if (!layer || !layer.visible || !layer.closed || layer.kind === 'reference' || layer.points.length < 3) return null;
 
   const pts         = layer.points;
