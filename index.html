@@ -66,7 +66,13 @@
 
       <!-- Layers -->
       <section class="panel" aria-labelledby="layersHeading">
-        <h2 id="layersHeading" class="panel-heading">Layers</h2>
+        <div class="panel-heading-row">
+          <h2 id="layersHeading" class="panel-heading">Layers</h2>
+          <div class="layer-vis-actions">
+            <button class="btn btn-xs" id="soloLayerBtn" title="Show only active layer">Solo</button>
+            <button class="btn btn-xs" id="showAllLayersBtn" title="Show all layers">All</button>
+          </div>
+        </div>
         <div id="layerList" class="layer-list" role="list" aria-label="Sketch layers"></div>
         <button class="btn btn-secondary btn-block" id="addLayerBtn">+ Add layer</button>
         <div id="layerEditPanel" class="layer-edit-panel" hidden>
@@ -86,6 +92,11 @@
           <div class="field-group">
             <label for="layerLevelInput">Level</label>
             <input type="number" id="layerLevelInput" class="text-input" min="0" max="9" step="1" value="0" aria-label="Floor level">
+          </div>
+          <div class="layer-shortcuts">
+            <button class="btn btn-shortcut" id="duplicateLayerBtn" title="Duplicate this layer">⧉ Duplicate</button>
+            <button class="btn btn-shortcut" id="upperFloorLayerBtn" title="Create upper floor from this outline">↑ Upper floor</button>
+            <button class="btn btn-shortcut" id="referenceLayerBtn" title="Create reference ghost from this outline">◎ Reference</button>
           </div>
           <button class="btn btn-danger btn-block" id="removeLayerBtn">Remove layer</button>
         </div>

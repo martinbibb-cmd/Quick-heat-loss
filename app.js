@@ -60,6 +60,18 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 }
 
+const LEVEL_LABELS = ['Ground', 'First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth'];
+function levelLabel(level) {
+  return LEVEL_LABELS[level] || `Floor ${level}`;
+}
+
+const KIND_LABELS = {
+  original:    'Original',
+  extension:   'Extension',
+  upper_floor: 'Upper floor',
+  reference:   'Reference',
+};
+
 function createLayer(name, kind, level) {
   return { id: generateId(), name, kind, level, visible: true, points: [], closed: false, edges: [] };
 }
@@ -360,7 +372,7 @@ function drawLayerPolygon(layer, isActive) {
         ctx.strokeStyle = hexToRgba(baseColour, strokeAlpha);
         ctx.setLineDash([]);
       }
-      ctx.lineWidth = isActive ? 2.5 : 1.5;
+      ctx.lineWidth = isActive ? 3 : 1;
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -964,7 +976,14 @@ function removeLayer(id) {
   if (idx < 0) return;
   state.layers.splice(idx, 1);
   if (state.activeLayerId === id) {
-    state.activeLayerId = state.layers[Math.max(0, idx - 1)].id;
+    // Prefer next visible eligible (non-reference) layer, then any visible, then any remaining
+    const next =
+      state.layers.find((l, i) => i >= idx && l.visible && l.kind !== 'reference') ||
+      state.layers.find(l => l.visible && l.kind !== 'reference') ||
+      state.layers.find(l => l.visible) ||
+      state.layers[Math.max(0, idx - 1)] ||
+      state.layers[0];
+    state.activeLayerId = next.id;
   }
   updateButtons();
   updateHint();
@@ -998,12 +1017,84 @@ function setLayerLevel(id, level) {
 
 function toggleLayerVisibility(id) {
   const layer = state.layers.find(l => l.id === id);
-  if (layer) {
-    layer.visible = !layer.visible;
-    updateResults();
-    renderLayerPanel();
-    render();
+  if (!layer) return;
+  layer.visible = !layer.visible;
+  // If we just hid the active layer, switch to the next visible eligible layer
+  if (!layer.visible && id === state.activeLayerId) {
+    const next =
+      state.layers.find(l => l.visible && l.kind !== 'reference') ||
+      state.layers.find(l => l.visible) ||
+      null;
+    if (next) state.activeLayerId = next.id;
   }
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+function showOnlyActiveLayer() {
+  state.layers.forEach(l => { l.visible = l.id === state.activeLayerId; });
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+function showAllLayers() {
+  state.layers.forEach(l => { l.visible = true; });
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+// ── Layer shortcuts ───────────────────────────────────────────────────────────
+
+/** Duplicate a layer, preserving all geometry and settings. */
+function duplicateLayer(layerId) {
+  const src = state.layers.find(l => l.id === layerId);
+  if (!src) return;
+  const copy = createLayer(_uniqueCopyName(src.name), src.kind, src.level);
+  copy.points = src.points.map(p => ({ ...p }));
+  copy.closed = src.closed;
+  copy.edges  = src.edges.map(e => ({ ...e }));
+  state.layers.push(copy);
+  selectLayer(copy.id);
+}
+
+/** Generate a unique copy name that avoids "copy copy copy" chains. */
+function _uniqueCopyName(srcName) {
+  const base = srcName.replace(/\s+copy(\s+\d+)?$/i, '').trim() || srcName;
+  const existingNames = new Set(state.layers.map(l => l.name));
+  if (!existingNames.has(base + ' copy')) return base + ' copy';
+  let n = 2;
+  while (existingNames.has(`${base} copy ${n}`)) n++;
+  return `${base} copy ${n}`;
+}
+
+/** Create an upper-floor layer from an existing layer's footprint. */
+function createUpperFloorFromLayer(layerId) {
+  const src = state.layers.find(l => l.id === layerId);
+  if (!src) return;
+  const name = suggestLayerName('upper_floor');
+  const copy = createLayer(name, 'upper_floor', src.level + 1);
+  copy.points = src.points.map(p => ({ ...p }));
+  copy.closed = src.closed;
+  copy.edges  = src.edges.map(e => ({ ...e }));
+  state.layers.push(copy);
+  selectLayer(copy.id);
+}
+
+/** Create a reference layer from an existing layer's footprint. */
+function createReferenceFromLayer(layerId) {
+  const src = state.layers.find(l => l.id === layerId);
+  if (!src) return;
+  const name = suggestLayerName('reference');
+  const copy = createLayer(name, 'reference', src.level);
+  copy.points  = src.points.map(p => ({ ...p }));
+  copy.closed  = src.closed;
+  copy.edges   = src.edges.map(e => ({ ...e }));
+  copy.visible = true;
+  state.layers.push(copy);
+  selectLayer(copy.id);
 }
 
 // ── Layer panel rendering ─────────────────────────────────────────────────────
@@ -1034,17 +1125,27 @@ function renderLayerPanel() {
     const nameEl = document.createElement('span');
     nameEl.className   = 'layer-name';
     nameEl.textContent = layer.name;
+    nameEl.title       = 'Double-click to rename';
+    // Double-click on the name → focus the rename input in the edit panel
+    nameEl.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      selectLayer(layer.id);
+      setTimeout(() => {
+        const ni = document.getElementById('layerNameInput');
+        if (ni) { ni.focus(); ni.select(); }
+      }, 0);
+    });
 
     const badges = document.createElement('div');
     badges.className = 'layer-badges';
 
     const kindBadge = document.createElement('span');
     kindBadge.className   = `layer-badge layer-badge--${layer.kind}`;
-    kindBadge.textContent = layer.kind.replaceAll('_', ' ');
+    kindBadge.textContent = KIND_LABELS[layer.kind] || layer.kind;
 
     const levelBadge = document.createElement('span');
     levelBadge.className   = 'layer-badge layer-badge--level';
-    levelBadge.textContent = 'L' + layer.level;
+    levelBadge.textContent = levelLabel(layer.level);
 
     badges.appendChild(kindBadge);
     badges.appendChild(levelBadge);
@@ -1176,6 +1277,24 @@ document.getElementById('layerLevelInput').addEventListener('change', function (
   const active = getActiveLayer();
   if (active) setLayerLevel(active.id, this.value);
 });
+
+document.getElementById('duplicateLayerBtn').addEventListener('click', () => {
+  const active = getActiveLayer();
+  if (active) duplicateLayer(active.id);
+});
+
+document.getElementById('upperFloorLayerBtn').addEventListener('click', () => {
+  const active = getActiveLayer();
+  if (active) createUpperFloorFromLayer(active.id);
+});
+
+document.getElementById('referenceLayerBtn').addEventListener('click', () => {
+  const active = getActiveLayer();
+  if (active) createReferenceFromLayer(active.id);
+});
+
+document.getElementById('soloLayerBtn').addEventListener('click', showOnlyActiveLayer);
+document.getElementById('showAllLayersBtn').addEventListener('click', showAllLayers);
 
 // ── Initialise ────────────────────────────────────────────────────────────────
 const resizeObserver = new ResizeObserver(resizeCanvas);
