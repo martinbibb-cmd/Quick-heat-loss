@@ -64,6 +64,33 @@
     <!-- ── Sidebar ── -->
     <aside class="sidebar" aria-label="Building settings and results">
 
+      <!-- Layers -->
+      <section class="panel" aria-labelledby="layersHeading">
+        <h2 id="layersHeading" class="panel-heading">Layers</h2>
+        <div id="layerList" class="layer-list" role="list" aria-label="Sketch layers"></div>
+        <button class="btn btn-secondary btn-block" id="addLayerBtn">+ Add layer</button>
+        <div id="layerEditPanel" class="layer-edit-panel" hidden>
+          <div class="field-group" style="margin-top:10px">
+            <label for="layerNameInput">Name</label>
+            <input type="text" id="layerNameInput" class="text-input" placeholder="Layer name" aria-label="Layer name">
+          </div>
+          <div class="field-group">
+            <label for="layerKindSelect">Type</label>
+            <select id="layerKindSelect" aria-label="Layer type">
+              <option value="original">Original footprint</option>
+              <option value="extension">Extension</option>
+              <option value="upper_floor">Upper floor</option>
+              <option value="reference">Reference</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="layerLevelInput">Level</label>
+            <input type="number" id="layerLevelInput" class="text-input" min="0" max="9" step="1" value="0" aria-label="Floor level">
+          </div>
+          <button class="btn btn-danger btn-block" id="removeLayerBtn">Remove layer</button>
+        </div>
+      </section>
+
       <!-- Building -->
       <section class="panel" aria-labelledby="buildingHeading">
         <h2 id="buildingHeading" class="panel-heading">Building</h2>

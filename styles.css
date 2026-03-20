@@ -563,3 +563,114 @@ select:focus {
 @media (min-width: 641px) and (max-width: 900px) {
   :root { --sidebar-w: 250px; }
 }
+
+/* ── Layer panel ─────────────────────────────────────────────────────────── */
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.layer-item:hover { background: var(--primary-light); border-color: var(--primary); }
+
+.layer-item--active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.layer-vis-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.layer-vis-btn:hover { color: var(--text); }
+
+.layer-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.layer-name {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.layer-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.layer-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.layer-badge--original    { background: #dbeafe; color: #1e40af; }
+.layer-badge--extension   { background: #d1fae5; color: #065f46; }
+.layer-badge--upper_floor { background: #ede9fe; color: #5b21b6; }
+.layer-badge--reference   { background: #f3f4f6; color: #6b7280; }
+.layer-badge--level       { background: #f3f4f6; color: #374151; }
+
+.layer-edit-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 8px;
+}
+
+.text-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+
+.text-input:focus {
+  outline: 2px solid var(--primary);
+  border-color: transparent;
+}
+
+.btn-block {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.layer-edit-panel .btn-block {
+  margin-top: 4px;
+}

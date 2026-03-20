@@ -47,20 +47,50 @@ const ACH     = 0.75; // air changes per hour (typical UK existing dwelling)
 const SNAP    = 0.5;  // snap grid size in metres
 const CLOSE_PX = 14; // pixel distance to auto-close polygon
 
+// ── Layer colours ─────────────────────────────────────────────────────────────
+const LAYER_COLOURS = {
+  original:    '#1a56db',
+  extension:   '#059669',
+  upper_floor: '#7c3aed',
+  reference:   '#9ca3af',
+};
+
+// ── Layer helpers ─────────────────────────────────────────────────────────────
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+}
+
+function createLayer(name, kind, level) {
+  return { id: generateId(), name, kind, level, visible: true, points: [], closed: false, edges: [] };
+}
+
+function getActiveLayer() {
+  return state.layers.find(l => l.id === state.activeLayerId) || null;
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 // ── App state ─────────────────────────────────────────────────────────────────
+// Create the initial default layer
+const _initLayer = createLayer('Original footprint', 'original', 0);
+
 const state = {
+  // Layers
+  layers:        [_initLayer],
+  activeLayerId: _initLayer.id,
+
   // Drawing
-  points:    [],    // [{x, y}] in metres (world coordinates)
-  closed:    false,
   hoverPt:   null, // snapped cursor position while drawing
 
   // View transform (world coords at canvas top-left in metres)
   scale:  40,   // CSS pixels per metre
   panX:  -2,    // world X at left edge
   panY:  -2,    // world Y at top edge
-
-  // Party walls: one entry per edge (edge i → points[i] to points[(i+1)%n])
-  edges: [],  // [{ isPartyWall: boolean }]
 
   // Interaction
   isPanning:       false,
@@ -145,13 +175,14 @@ function pointToSegmentDistance(px, py, ax, ay, bx, by) {
  * fixed pixel threshold, or -1 if none is close enough.
  */
 function getEdgeIndexAtClient(clientX, clientY) {
-  if (!state.closed) return -1;
+  const layer = getActiveLayer();
+  if (!layer || !layer.closed) return -1;
   const rect = canvas.getBoundingClientRect();
   const cx = clientX - rect.left;
   const cy = clientY - rect.top;
   const thresholdPx = 12;
   let best = -1, bestDist = thresholdPx;
-  const pts = state.points;
+  const pts = layer.points;
   for (let i = 0; i < pts.length; i++) {
     const a = w2c(pts[i].x, pts[i].y);
     const b = w2c(pts[(i + 1) % pts.length].x, pts[(i + 1) % pts.length].y);
@@ -165,16 +196,15 @@ function getEdgeIndexAtClient(clientX, clientY) {
  * Auto-assign party walls based on dwelling type.
  * Longest edge(s) are made party walls for semi/end-terrace/mid-terrace.
  */
-function applyDefaultExposure() {
-  const edges = state.edges;
-  if (edges.length === 0) return;
-  edges.forEach(e => { e.isPartyWall = false; });
+function applyDefaultExposure(layer) {
+  if (!layer || layer.edges.length === 0) return;
+  layer.edges.forEach(e => { e.isPartyWall = false; });
 
   const type = state.dwellingType;
   if (type === 'detached') return;
 
-  const pts = state.points;
-  const sorted = edges
+  const pts = layer.points;
+  const sorted = layer.edges
     .map((e, i) => {
       const next = pts[(i + 1) % pts.length];
       return { i, length: Math.hypot(next.x - pts[i].x, next.y - pts[i].y) };
@@ -182,26 +212,38 @@ function applyDefaultExposure() {
     .sort((a, b) => b.length - a.length);
 
   if (type === 'semi' || type === 'endTerrace') {
-    edges[sorted[0].i].isPartyWall = true;
+    layer.edges[sorted[0].i].isPartyWall = true;
   } else if (type === 'midTerrace') {
-    edges[sorted[0].i].isPartyWall = true;
-    if (sorted.length > 1) edges[sorted[1].i].isPartyWall = true;
+    layer.edges[sorted[0].i].isPartyWall = true;
+    if (sorted.length > 1) layer.edges[sorted[1].i].isPartyWall = true;
   }
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
 function render() {
   ctx.clearRect(0, 0, cssW, cssH);
-
-  // Background
   ctx.fillStyle = '#f8fafc';
   ctx.fillRect(0, 0, cssW, cssH);
-
   drawGrid();
-  drawPolygon();
-  drawVertices();
-  drawCursorSnap();
-  drawEdgeLengths();
+
+  // Render inactive visible layers first (behind active layer)
+  state.layers.forEach(layer => {
+    if (!layer.visible || layer.id === state.activeLayerId) return;
+    drawLayerPolygon(layer, false);
+    drawLayerVertices(layer, false);
+  });
+
+  // Render active layer on top
+  const active = getActiveLayer();
+  if (active) {
+    if (active.visible) {
+      drawLayerPolygon(active, true);
+      drawLayerVertices(active, true);
+    }
+    drawCursorSnap();
+    drawEdgeLengths(active);
+  }
+
   drawScaleBar();
 }
 
@@ -278,11 +320,16 @@ function drawGrid() {
   }
 }
 
-function drawPolygon() {
-  const pts = state.points;
+function drawLayerPolygon(layer, isActive) {
+  const pts = layer.points;
   if (pts.length < 2) return;
 
-  if (state.closed) {
+  const baseColour  = LAYER_COLOURS[layer.kind] || '#1a56db';
+  const isRef       = layer.kind === 'reference';
+  const strokeAlpha = isActive ? 1 : 0.3;
+  const fillAlpha   = isActive ? (isRef ? 0.04 : 0.10) : 0.04;
+
+  if (layer.closed) {
     // Fill
     ctx.beginPath();
     const s = w2c(pts[0].x, pts[0].y);
@@ -292,30 +339,33 @@ function drawPolygon() {
       ctx.lineTo(p.x, p.y);
     }
     ctx.closePath();
-    ctx.fillStyle = 'rgba(26, 86, 219, 0.10)';
+    ctx.fillStyle = hexToRgba(baseColour, fillAlpha);
     ctx.fill();
 
-    // Draw each edge with party-wall-aware styling
+    // Edges
     for (let i = 0; i < pts.length; i++) {
       const a = w2c(pts[i].x, pts[i].y);
       const b = w2c(pts[(i + 1) % pts.length].x, pts[(i + 1) % pts.length].y);
-      const isParty = state.edges[i] && state.edges[i].isPartyWall;
+      const isParty = layer.edges[i] && layer.edges[i].isPartyWall;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
-      if (isParty) {
-        ctx.strokeStyle = '#888888';
+      if (isRef) {
+        ctx.strokeStyle = hexToRgba(baseColour, strokeAlpha * 0.7);
+        ctx.setLineDash([8, 5]);
+      } else if (isParty) {
+        ctx.strokeStyle = `rgba(136,136,136,${strokeAlpha})`;
         ctx.setLineDash([6, 4]);
       } else {
-        ctx.strokeStyle = '#1a56db';
+        ctx.strokeStyle = hexToRgba(baseColour, strokeAlpha);
         ctx.setLineDash([]);
       }
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = isActive ? 2.5 : 1.5;
       ctx.stroke();
     }
     ctx.setLineDash([]);
-  } else {
-    // Open polygon: draw preview with dashed line to cursor
+  } else if (isActive) {
+    // Open polygon preview (only for active layer)
     ctx.beginPath();
     const s0 = w2c(pts[0].x, pts[0].y);
     ctx.moveTo(s0.x, s0.y);
@@ -323,12 +373,11 @@ function drawPolygon() {
       const p = w2c(pts[i].x, pts[i].y);
       ctx.lineTo(p.x, p.y);
     }
-    // Live preview to cursor
     if (state.hoverPt) {
       const hp = w2c(state.hoverPt.x, state.hoverPt.y);
       ctx.lineTo(hp.x, hp.y);
     }
-    ctx.strokeStyle = '#1a56db';
+    ctx.strokeStyle = baseColour;
     ctx.lineWidth   = 2;
     ctx.setLineDash([7, 5]);
     ctx.stroke();
@@ -336,19 +385,18 @@ function drawPolygon() {
   }
 }
 
-function drawVertices() {
-  state.points.forEach((pt, i) => {
+function drawLayerVertices(layer, isActive) {
+  if (!isActive) return; // Only show handles for the active layer
+  const baseColour = LAYER_COLOURS[layer.kind] || '#1a56db';
+  layer.points.forEach((pt, i) => {
     const cp = w2c(pt.x, pt.y);
-
     ctx.beginPath();
     ctx.arc(cp.x, cp.y, 6, 0, Math.PI * 2);
-
-    if (i === 0 && !state.closed) {
-      // Green = close target
+    if (i === 0 && !layer.closed) {
       ctx.fillStyle   = '#10b981';
       ctx.strokeStyle = '#ffffff';
     } else {
-      ctx.fillStyle   = '#1a56db';
+      ctx.fillStyle   = baseColour;
       ctx.strokeStyle = '#ffffff';
     }
     ctx.fill();
@@ -358,7 +406,7 @@ function drawVertices() {
 }
 
 function drawCursorSnap() {
-  if (state.closed || !state.hoverPt) return;
+  if (!state.hoverPt) return;
   const cp = w2c(state.hoverPt.x, state.hoverPt.y);
 
   // Snap dot
@@ -386,9 +434,9 @@ function drawCursorSnap() {
   ctx.fillText(label, lx, ly);
 }
 
-function drawEdgeLengths() {
-  if (!state.closed || state.points.length < 2) return;
-  const pts = state.points;
+function drawEdgeLengths(layer) {
+  if (!layer || !layer.closed || layer.points.length < 2) return;
+  const pts = layer.points;
 
   ctx.font        = '11px system-ui, sans-serif';
   ctx.textBaseline = 'alphabetic';
@@ -466,8 +514,10 @@ function pinchCenter(e) {
 }
 
 function pixelDistToPoint(clientX, clientY, ptIndex) {
+  const layer = getActiveLayer();
+  if (!layer) return Infinity;
   const rect = canvas.getBoundingClientRect();
-  const cp   = w2c(state.points[ptIndex].x, state.points[ptIndex].y);
+  const cp   = w2c(layer.points[ptIndex].x, layer.points[ptIndex].y);
   return Math.hypot(clientX - rect.left - cp.x, clientY - rect.top - cp.y);
 }
 
@@ -492,7 +542,8 @@ function zoomAt(clientX, clientY, factor) {
 
 // ── Pointer event handlers ────────────────────────────────────────────────────
 function onPointerDown(e) {
-  const pos = clientPos(e);
+  const pos   = clientPos(e);
+  const layer = getActiveLayer();
 
   // Pan: middle-mouse or Alt+drag
   if (e.button === 1 || (e.button === 0 && e.altKey)) {
@@ -502,9 +553,9 @@ function onPointerDown(e) {
     return;
   }
 
-  if (state.closed) {
+  if (layer && layer.closed) {
     // Drag existing vertex?
-    for (let i = 0; i < state.points.length; i++) {
+    for (let i = 0; i < layer.points.length; i++) {
       if (pixelDistToPoint(pos.x, pos.y, i) < 14) {
         state.dragIndex = i;
         return;
@@ -513,30 +564,33 @@ function onPointerDown(e) {
     // Toggle party wall on edge click
     const edgeIdx = getEdgeIndexAtClient(pos.x, pos.y);
     if (edgeIdx >= 0) {
-      state.edges[edgeIdx].isPartyWall = !state.edges[edgeIdx].isPartyWall;
+      layer.edges[edgeIdx].isPartyWall = !layer.edges[edgeIdx].isPartyWall;
       updateResults();
       render();
     }
     return;
   }
 
+  if (!layer) return;
+
   const wp      = client2world(pos.x, pos.y);
   const snapped = snap(wp.x, wp.y);
 
   // Auto-close if clicking near the first vertex (and >= 3 points exist)
-  if (state.points.length >= 3 && pixelDistToPoint(pos.x, pos.y, 0) < CLOSE_PX) {
+  if (layer.points.length >= 3 && pixelDistToPoint(pos.x, pos.y, 0) < CLOSE_PX) {
     closePolygon();
     return;
   }
 
-  state.points.push(snapped);
+  layer.points.push(snapped);
   updateButtons();
   updateHint();
   render();
 }
 
 function onPointerMove(e) {
-  const pos = clientPos(e);
+  const pos   = clientPos(e);
+  const layer = getActiveLayer();
 
   if (state.isPanning) {
     const dx = (pos.x - state.lastPointer.x) / state.scale;
@@ -548,15 +602,15 @@ function onPointerMove(e) {
     return;
   }
 
-  if (state.dragIndex >= 0) {
+  if (state.dragIndex >= 0 && layer) {
     const wp  = client2world(pos.x, pos.y);
-    state.points[state.dragIndex] = snap(wp.x, wp.y);
+    layer.points[state.dragIndex] = snap(wp.x, wp.y);
     updateResults();
     render();
     return;
   }
 
-  if (!state.closed) {
+  if (layer && !layer.closed) {
     const wp  = client2world(pos.x, pos.y);
     state.hoverPt = snap(wp.x, wp.y);
     render();
@@ -629,7 +683,8 @@ canvas.addEventListener('mousemove',  onPointerMove);
 canvas.addEventListener('mouseup',    onPointerUp);
 canvas.addEventListener('mouseleave', () => {
   state.hoverPt = null;
-  if (!state.closed) render();
+  const active = getActiveLayer();
+  if (!active || !active.closed) render();
 });
 
 canvas.addEventListener('wheel', e => {
@@ -645,52 +700,59 @@ canvas.addEventListener('contextmenu', e => {
 
 // ── Polygon operations ────────────────────────────────────────────────────────
 function closePolygon() {
-  if (state.points.length < 3) return;
-  state.edges   = state.points.map(() => ({ isPartyWall: false }));
-  applyDefaultExposure();
-  state.closed  = true;
+  const layer = getActiveLayer();
+  if (!layer || layer.points.length < 3) return;
+  layer.edges  = layer.points.map(() => ({ isPartyWall: false }));
+  applyDefaultExposure(layer);
+  layer.closed  = true;
   state.hoverPt = null;
   updateButtons();
   updateHint();
   updateResults();
+  renderLayerPanel();
   render();
 }
 
 function undoLastPoint() {
-  if (state.closed) {
-    state.closed = false;
-    state.edges  = [];
+  const layer = getActiveLayer();
+  if (!layer) return;
+  if (layer.closed) {
+    layer.closed = false;
+    layer.edges  = [];
     updateResults();
-  } else if (state.points.length > 0) {
-    state.points.pop();
+  } else if (layer.points.length > 0) {
+    layer.points.pop();
   }
   updateButtons();
   updateHint();
+  renderLayerPanel();
   render();
 }
 
 function clearAll() {
-  state.points    = [];
-  state.closed    = false;
+  const layer = getActiveLayer();
+  if (layer) {
+    layer.points  = [];
+    layer.closed  = false;
+    layer.edges   = [];
+  }
   state.hoverPt   = null;
   state.dragIndex = -1;
-  state.edges     = [];
   updateButtons();
   updateHint();
   clearResults();
+  renderLayerPanel();
   render();
 }
 
 function fitToView() {
-  if (state.points.length === 0) {
-    state.scale = 40;
-    state.panX  = -2;
-    state.panY  = -2;
-    render();
-    return;
+  const allPts = state.layers.filter(l => l.visible).flatMap(l => l.points);
+  if (allPts.length === 0) {
+    state.scale = 40; state.panX = -2; state.panY = -2;
+    render(); return;
   }
-  const xs   = state.points.map(p => p.x);
-  const ys   = state.points.map(p => p.y);
+  const xs   = allPts.map(p => p.x);
+  const ys   = allPts.map(p => p.y);
   const minX = Math.min(...xs) - 2;
   const maxX = Math.max(...xs) + 2;
   const minY = Math.min(...ys) - 2;
@@ -732,9 +794,10 @@ function r(v, dp) {
 }
 
 function calculateHeatLoss() {
-  if (!state.closed || state.points.length < 3) return null;
+  const layer = getActiveLayer();
+  if (!layer || !layer.closed || layer.kind === 'reference' || layer.points.length < 3) return null;
 
-  const pts         = state.points;
+  const pts         = layer.points;
   const floorArea   = polygonArea(pts);
   const perimeter   = polygonPerimeter(pts);
   const totalHeight = state.storeys * state.ceilingHeight;
@@ -743,7 +806,7 @@ function calculateHeatLoss() {
   // Compute exposed and party perimeters from edge flags
   let exposedPerimeter = 0;
   let partyPerimeter   = 0;
-  state.edges.forEach((edge, i) => {
+  layer.edges.forEach((edge, i) => {
     const a = pts[i];
     const b = pts[(i + 1) % pts.length];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
@@ -792,25 +855,29 @@ function calculateHeatLoss() {
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function updateButtons() {
-  document.getElementById('undoBtn').disabled      = state.points.length === 0;
-  document.getElementById('closeShapeBtn').disabled = state.points.length < 3 || state.closed;
+  const layer = getActiveLayer();
+  document.getElementById('undoBtn').disabled       = !layer || layer.points.length === 0;
+  document.getElementById('closeShapeBtn').disabled = !layer || layer.points.length < 3 || layer.closed;
 }
 
 function updateHint() {
-  const hint = document.getElementById('canvasHint');
-  if (state.closed) {
+  const hint  = document.getElementById('canvasHint');
+  const layer = getActiveLayer();
+  if (!layer) {
+    hint.textContent = 'Select or create a layer to start drawing';
+    hint.classList.remove('hidden');
+    return;
+  }
+  if (layer.closed) {
     hint.textContent = 'Click or tap walls to mark as party walls · Drag corners to adjust';
-    hint.classList.remove('hidden');
-  } else if (state.points.length === 0) {
+  } else if (layer.points.length === 0) {
     hint.textContent = 'Click to place first corner point';
-    hint.classList.remove('hidden');
-  } else if (state.points.length < 3) {
-    hint.textContent = `${state.points.length} point${state.points.length > 1 ? 's' : ''} — keep clicking to add corners`;
-    hint.classList.remove('hidden');
+  } else if (layer.points.length < 3) {
+    hint.textContent = `${layer.points.length} point${layer.points.length > 1 ? 's' : ''} — keep clicking to add corners`;
   } else {
     hint.textContent = 'Click the green point to close, or press Close Shape';
-    hint.classList.remove('hidden');
   }
+  hint.classList.remove('hidden');
 }
 
 function updateResults() {
@@ -837,6 +904,145 @@ function updateResults() {
 function clearResults() {
   document.getElementById('resultsPlaceholder').hidden = false;
   document.getElementById('resultsContent').hidden     = true;
+}
+
+// ── Layer management ──────────────────────────────────────────────────────────
+
+function addLayer() {
+  const count    = state.layers.length + 1;
+  const newLayer = createLayer(`Layer ${count}`, 'original', 0);
+  state.layers.push(newLayer);
+  selectLayer(newLayer.id);
+}
+
+function selectLayer(id) {
+  state.activeLayerId = id;
+  state.hoverPt       = null;
+  state.dragIndex     = -1;
+  updateButtons();
+  updateHint();
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+function removeLayer(id) {
+  if (state.layers.length <= 1) return;
+  const idx = state.layers.findIndex(l => l.id === id);
+  if (idx < 0) return;
+  state.layers.splice(idx, 1);
+  if (state.activeLayerId === id) {
+    state.activeLayerId = state.layers[Math.max(0, idx - 1)].id;
+  }
+  updateButtons();
+  updateHint();
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+function renameLayer(id, name) {
+  const layer = state.layers.find(l => l.id === id);
+  if (layer) { layer.name = name.trim() || layer.name; }
+}
+
+function setLayerKind(id, kind) {
+  const layer = state.layers.find(l => l.id === id);
+  if (layer) {
+    layer.kind = kind;
+    updateResults();
+    renderLayerPanel();
+    render();
+  }
+}
+
+function setLayerLevel(id, level) {
+  const layer = state.layers.find(l => l.id === id);
+  if (layer) {
+    layer.level = parseInt(level, 10) || 0;
+    renderLayerPanel();
+  }
+}
+
+function toggleLayerVisibility(id) {
+  const layer = state.layers.find(l => l.id === id);
+  if (layer) {
+    layer.visible = !layer.visible;
+    renderLayerPanel();
+    render();
+  }
+}
+
+// ── Layer panel rendering ─────────────────────────────────────────────────────
+
+function renderLayerPanel() {
+  const list = document.getElementById('layerList');
+  if (!list) return;
+
+  list.innerHTML = '';
+  state.layers.forEach(layer => {
+    const isActive = layer.id === state.activeLayerId;
+    const item = document.createElement('div');
+    item.className = 'layer-item' + (isActive ? ' layer-item--active' : '');
+    item.setAttribute('role', 'listitem');
+
+    // Visibility toggle
+    const visBtn = document.createElement('button');
+    visBtn.className = 'layer-vis-btn';
+    visBtn.setAttribute('aria-label', layer.visible ? 'Hide layer' : 'Show layer');
+    visBtn.title     = layer.visible ? 'Hide layer' : 'Show layer';
+    visBtn.textContent = layer.visible ? '●' : '○';
+    visBtn.addEventListener('click', e => { e.stopPropagation(); toggleLayerVisibility(layer.id); });
+
+    // Info area
+    const info = document.createElement('div');
+    info.className = 'layer-info';
+
+    const nameEl = document.createElement('span');
+    nameEl.className   = 'layer-name';
+    nameEl.textContent = layer.name;
+
+    const badges = document.createElement('div');
+    badges.className = 'layer-badges';
+
+    const kindBadge = document.createElement('span');
+    kindBadge.className   = `layer-badge layer-badge--${layer.kind}`;
+    kindBadge.textContent = layer.kind.replaceAll('_', '\u202F');
+
+    const levelBadge = document.createElement('span');
+    levelBadge.className   = 'layer-badge layer-badge--level';
+    levelBadge.textContent = 'L' + layer.level;
+
+    badges.appendChild(kindBadge);
+    badges.appendChild(levelBadge);
+    info.appendChild(nameEl);
+    info.appendChild(badges);
+
+    item.appendChild(visBtn);
+    item.appendChild(info);
+    item.addEventListener('click', () => selectLayer(layer.id));
+    list.appendChild(item);
+  });
+
+  // Populate edit panel for active layer
+  const active    = getActiveLayer();
+  const editPanel = document.getElementById('layerEditPanel');
+  if (!editPanel) return;
+
+  if (active) {
+    editPanel.hidden = false;
+    const nameInput  = document.getElementById('layerNameInput');
+    const kindSelect = document.getElementById('layerKindSelect');
+    const levelInput = document.getElementById('layerLevelInput');
+    const removeBtn  = document.getElementById('removeLayerBtn');
+
+    if (nameInput)  nameInput.value  = active.name;
+    if (kindSelect) kindSelect.value = active.kind;
+    if (levelInput) levelInput.value = active.level;
+    if (removeBtn)  removeBtn.disabled = state.layers.length <= 1;
+  } else {
+    editPanel.hidden = true;
+  }
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
@@ -906,11 +1112,35 @@ document.getElementById('ceilingHeight').addEventListener('input', function () {
 
 document.getElementById('dwellingType').addEventListener('change', function () {
   state.dwellingType = this.value;
-  if (state.closed && state.edges.length > 0) {
-    applyDefaultExposure();
+  const layer = getActiveLayer();
+  if (layer && layer.closed && layer.edges.length > 0) {
+    applyDefaultExposure(layer);
     render();
   }
   updateResults();
+});
+
+// ── Layer panel events ────────────────────────────────────────────────────────
+document.getElementById('addLayerBtn').addEventListener('click', addLayer);
+
+document.getElementById('removeLayerBtn').addEventListener('click', () => {
+  const active = getActiveLayer();
+  if (active) removeLayer(active.id);
+});
+
+document.getElementById('layerNameInput').addEventListener('input', function () {
+  const active = getActiveLayer();
+  if (active) { renameLayer(active.id, this.value); renderLayerPanel(); }
+});
+
+document.getElementById('layerKindSelect').addEventListener('change', function () {
+  const active = getActiveLayer();
+  if (active) setLayerKind(active.id, this.value);
+});
+
+document.getElementById('layerLevelInput').addEventListener('change', function () {
+  const active = getActiveLayer();
+  if (active) setLayerLevel(active.id, this.value);
 });
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -919,6 +1149,7 @@ resizeObserver.observe(canvas.parentElement);
 
 updateHint();
 updateButtons();
+renderLayerPanel();
 
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {
