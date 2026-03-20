@@ -748,8 +748,11 @@ function clearAll() {
 function fitToView() {
   const allPts = state.layers.filter(l => l.visible).flatMap(l => l.points);
   if (allPts.length === 0) {
-    state.scale = 40; state.panX = -2; state.panY = -2;
-    render(); return;
+    state.scale = 40;
+    state.panX  = -2;
+    state.panY  = -2;
+    render();
+    return;
   }
   const xs   = allPts.map(p => p.x);
   const ys   = allPts.map(p => p.y);
@@ -1007,7 +1010,7 @@ function renderLayerPanel() {
 
     const kindBadge = document.createElement('span');
     kindBadge.className   = `layer-badge layer-badge--${layer.kind}`;
-    kindBadge.textContent = layer.kind.replaceAll('_', '\u202F');
+    kindBadge.textContent = layer.kind.replaceAll('_', ' ');
 
     const levelBadge = document.createElement('span');
     levelBadge.className   = 'layer-badge layer-badge--level';
@@ -1036,7 +1039,8 @@ function renderLayerPanel() {
     const levelInput = document.getElementById('layerLevelInput');
     const removeBtn  = document.getElementById('removeLayerBtn');
 
-    if (nameInput)  nameInput.value  = active.name;
+    // Don't overwrite the name field while the user is actively editing it
+    if (nameInput && document.activeElement !== nameInput)  nameInput.value = active.name;
     if (kindSelect) kindSelect.value = active.kind;
     if (levelInput) levelInput.value = active.level;
     if (removeBtn)  removeBtn.disabled = state.layers.length <= 1;
