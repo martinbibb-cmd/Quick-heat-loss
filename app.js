@@ -796,9 +796,11 @@ function r(v, dp) {
   return Math.round(v * m) / m;
 }
 
+// TODO: future PR will aggregate across multiple non-reference layers
 function calculateHeatLoss() {
   const layer = getActiveLayer();
-  if (!layer || !layer.closed || layer.kind === 'reference' || layer.points.length < 3) return null;
+  // Only visible, non-reference, closed layers are eligible for calculation
+  if (!layer || !layer.visible || !layer.closed || layer.kind === 'reference' || layer.points.length < 3) return null;
 
   const pts         = layer.points;
   const floorArea   = polygonArea(pts);
@@ -911,9 +913,34 @@ function clearResults() {
 
 // ── Layer management ──────────────────────────────────────────────────────────
 
+const FLOOR_ORDINALS = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth'];
+
+/**
+ * Suggest a default name for a new layer of the given kind, based on how
+ * many layers of that kind already exist.
+ */
+function suggestLayerName(kind) {
+  const count = state.layers.filter(l => l.kind === kind).length;
+  switch (kind) {
+    case 'extension': {
+      return `Extension ${count + 1}`;
+    }
+    case 'upper_floor': {
+      const ordinal = FLOOR_ORDINALS[count] || `Floor ${count + 1}`;
+      return `${ordinal} floor`;
+    }
+    case 'reference': {
+      return count === 0 ? 'Reference outline' : `Reference ${count + 1}`;
+    }
+    default:
+      return 'Original footprint';
+  }
+}
+
 function addLayer() {
-  const count    = state.layers.length + 1;
-  const newLayer = createLayer(`Layer ${count}`, 'original', 0);
+  const kind     = 'extension';
+  const name     = suggestLayerName(kind);
+  const newLayer = createLayer(name, kind, 0);
   state.layers.push(newLayer);
   selectLayer(newLayer.id);
 }
@@ -971,6 +998,7 @@ function toggleLayerVisibility(id) {
   const layer = state.layers.find(l => l.id === id);
   if (layer) {
     layer.visible = !layer.visible;
+    updateResults();
     renderLayerPanel();
     render();
   }
