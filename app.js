@@ -73,7 +73,13 @@ const KIND_LABELS = {
 };
 
 function createLayer(name, kind, level) {
-  return { id: generateId(), name, kind, level, visible: true, points: [], closed: false, edges: [] };
+  // CHANGE 2: Each layer carries its own storeys and ceilingHeight so that the
+  // story height of each section is independent of every other section.
+  // Default values match the global building-panel defaults.
+  return {
+    id: generateId(), name, kind, level, visible: true, points: [], closed: false, edges: [],
+    storeys: 2, ceilingHeight: 2.4,
+  };
 }
 
 function getActiveLayer() {
@@ -808,39 +814,84 @@ function r(v, dp) {
   return Math.round(v * m) / m;
 }
 
-// TODO (future PR): proper multi-layer aggregation logic, overlap handling between
-// layers, and level-aware exposed wall calculations.
-function calculateHeatLoss() {
-  const layer = getActiveLayer();
-  // Only visible, non-reference, closed layers are eligible for calculation.
-  // If no eligible layer is active, returns null and the results panel shows the placeholder.
-  if (!layer || !layer.visible || !layer.closed || layer.kind === 'reference' || layer.points.length < 3) return null;
+// ── Heat loss calculation ─────────────────────────────────────────────────────
+//
+// CHANGE 3: getSharedEdgeIndices
+//   Returns the Set of edge indices in `layer` whose wall is shared with an
+//   edge in any of the `neighbours` layers.  Shared edges are internal walls
+//   between adjoining sections and must be excluded from the exposed-wall
+//   perimeter so their heat loss is not over-counted.
+//
+//   Two edges are considered shared when both endpoint coordinates match
+//   within EPSILON metres (in either winding direction, because the same
+//   physical wall is drawn as part of two different polygons traversed in
+//   opposite directions).
+//
+// To replicate: for each edge i in `layer`, iterate every edge j in every
+// neighbour; if (a1≈b1 && a2≈b2) || (a1≈b2 && a2≈b1), mark i as shared.
+function getSharedEdgeIndices(layer, neighbours) {
+  const shared  = new Set();
+  const EPSILON = 0.01; // metres — well below the 0.5 m snap grid
+  function near(a, b) { return Math.hypot(a.x - b.x, a.y - b.y) < EPSILON; }
 
+  const n = layer.points.length;
+  for (let i = 0; i < n; i++) {
+    const a1 = layer.points[i];
+    const a2 = layer.points[(i + 1) % n];
+    outer: for (const other of neighbours) {
+      const m = other.points.length;
+      for (let j = 0; j < m; j++) {
+        const b1 = other.points[j];
+        const b2 = other.points[(j + 1) % m];
+        if ((near(a1, b1) && near(a2, b2)) || (near(a1, b2) && near(a2, b1))) {
+          shared.add(i);
+          break outer;
+        }
+      }
+    }
+  }
+  return shared;
+}
+
+// CHANGE 1 + 2 + 3: calculateLayerHeatLoss
+//   Calculates heat loss for a single `layer`.
+//
+//   CHANGE 2: Uses layer.storeys and layer.ceilingHeight (per-layer height)
+//             instead of the previous global state.storeys/state.ceilingHeight.
+//
+//   CHANGE 3: `sharedEdgeIndices` (Set) lists edge indices that are shared
+//             with an adjoining layer; those edges are skipped so that the
+//             internal wall between two sections is not treated as exposed.
+//
+// To replicate: replace `state.storeys * state.ceilingHeight` with
+//   `layer.storeys * layer.ceilingHeight`, and add the `if (sharedEdgeIndices.has(i)) return;`
+//   guard inside the edge-iteration loop.
+function calculateLayerHeatLoss(layer, sharedEdgeIndices) {
   const pts         = layer.points;
   const floorArea   = polygonArea(pts);
   const perimeter   = polygonPerimeter(pts);
-  const totalHeight = state.storeys * state.ceilingHeight;
+  // CHANGE 2: per-layer height — independent of every other layer
+  const totalHeight = layer.storeys * layer.ceilingHeight;
   const volume      = floorArea * totalHeight;
 
   // Compute exposed and party perimeters from edge flags
   let exposedPerimeter = 0;
   let partyPerimeter   = 0;
   layer.edges.forEach((edge, i) => {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
+    // CHANGE 3: internal walls shared with an adjoining layer are not exposed
+    if (sharedEdgeIndices.has(i)) return;
+    const a   = pts[i];
+    const b   = pts[(i + 1) % pts.length];
     const len = Math.hypot(b.x - a.x, b.y - a.y);
-    if (edge.isPartyWall) {
-      partyPerimeter += len;
-    } else {
-      exposedPerimeter += len;
-    }
+    if (edge.isPartyWall) partyPerimeter += len;
+    else                  exposedPerimeter += len;
   });
 
-  const grossWallArea  = exposedPerimeter * totalHeight;
-  const glazingFrac    = GLAZING_FRACTION[state.glazingAmount];
-  const glazingArea    = grossWallArea * glazingFrac;
-  const netWallArea    = grossWallArea - glazingArea;
-  const roofArea       = floorArea; // top storey ceiling only
+  const grossWallArea = exposedPerimeter * totalHeight;
+  const glazingFrac   = GLAZING_FRACTION[state.glazingAmount];
+  const glazingArea   = grossWallArea * glazingFrac;
+  const netWallArea   = grossWallArea - glazingArea;
+  const roofArea      = floorArea; // top storey ceiling only
 
   const uWall    = U_WALL[state.wallType];
   const uLoft    = U_LOFT[state.loftInsulation];
@@ -850,25 +901,74 @@ function calculateHeatLoss() {
   // Exposed wall + small residual through party walls
   const partyWallArea = partyPerimeter * totalHeight;
   const wallHL    = (netWallArea * uWall + partyWallArea * uWall * PARTY_WALL_FACTOR) * DELTA_T;
-  const glazingHL = glazingArea * uGlazing * DELTA_T;
-  const roofHL    = roofArea    * uLoft    * DELTA_T;
-  const floorHL   = floorArea   * uFloor   * DELTA_T;
-  const ventHL    = volume * ACH * 0.33 * DELTA_T;   // 0.33 Wh/m³K · s/h conversion
-  const totalHL   = wallHL + glazingHL + roofHL + floorHL + ventHL;
+  const glazingHL = glazingArea  * uGlazing * DELTA_T;
+  const roofHL    = roofArea     * uLoft    * DELTA_T;
+  const floorHL   = floorArea    * uFloor   * DELTA_T;
+  const ventHL    = volume * ACH * 0.33 * DELTA_T; // 0.33 Wh/m³K · s/h conversion
+
+  return { floorArea, perimeter, netWallArea, glazingArea, roofArea, volume,
+           wallHL, glazingHL, roofHL, floorHL, ventHL };
+}
+
+// CHANGE 1: calculateHeatLoss — total = Σ across all eligible layers
+//
+//   Previously this function calculated only the active layer.  It now
+//   iterates every eligible layer (visible, non-reference, closed, ≥3 points)
+//   and sums all heat-loss contributions.
+//
+//   CHANGE 2: each layer uses its own storeys/ceilingHeight (delegated to
+//             calculateLayerHeatLoss).
+//
+//   CHANGE 3: shared edges between adjoining layers are excluded from the
+//             exposed-wall perimeter (delegated to getSharedEdgeIndices).
+//
+// To replicate:
+//   1. Replace `const layer = getActiveLayer()` with a filter over all layers.
+//   2. Loop, calling calculateLayerHeatLoss per layer, and accumulate totals.
+function calculateHeatLoss() {
+  const eligible = state.layers.filter(l =>
+    l.visible && l.closed && l.kind !== 'reference' && l.points.length >= 3
+  );
+  if (eligible.length === 0) return null;
+
+  let totFloorArea = 0, totPerimeter = 0, totNetWallArea = 0;
+  let totGlazingArea = 0, totRoofArea = 0, totVolume = 0;
+  let totWallHL = 0, totGlazingHL = 0, totRoofHL = 0, totFloorHL = 0, totVentHL = 0;
+
+  eligible.forEach(layer => {
+    // CHANGE 3: find edges shared with any other eligible layer
+    const neighbours  = eligible.filter(l => l.id !== layer.id);
+    const sharedEdges = getSharedEdgeIndices(layer, neighbours);
+    const res         = calculateLayerHeatLoss(layer, sharedEdges);
+
+    totFloorArea   += res.floorArea;
+    totPerimeter   += res.perimeter;
+    totNetWallArea += res.netWallArea;
+    totGlazingArea += res.glazingArea;
+    totRoofArea    += res.roofArea;
+    totVolume      += res.volume;
+    totWallHL      += res.wallHL;
+    totGlazingHL   += res.glazingHL;
+    totRoofHL      += res.roofHL;
+    totFloorHL     += res.floorHL;
+    totVentHL      += res.ventHL;
+  });
+
+  const totalHL = totWallHL + totGlazingHL + totRoofHL + totFloorHL + totVentHL;
 
   return {
-    floorArea:   r(floorArea,   1),
-    perimeter:   r(perimeter,   1),
-    netWallArea: r(netWallArea, 1),
-    glazingArea: r(glazingArea, 1),
-    roofArea:    r(roofArea,    1),
-    volume:      r(volume,      0),
-    wallHL:      r(wallHL    / 1000, 2),
-    glazingHL:   r(glazingHL / 1000, 2),
-    roofHL:      r(roofHL    / 1000, 2),
-    floorHL:     r(floorHL   / 1000, 2),
-    ventHL:      r(ventHL    / 1000, 2),
-    totalHL:     r(totalHL   / 1000, 1),
+    floorArea:   r(totFloorArea,   1),
+    perimeter:   r(totPerimeter,   1),
+    netWallArea: r(totNetWallArea, 1),
+    glazingArea: r(totGlazingArea, 1),
+    roofArea:    r(totRoofArea,    1),
+    volume:      r(totVolume,      0),
+    wallHL:      r(totWallHL    / 1000, 2),
+    glazingHL:   r(totGlazingHL / 1000, 2),
+    roofHL:      r(totRoofHL    / 1000, 2),
+    floorHL:     r(totFloorHL   / 1000, 2),
+    ventHL:      r(totVentHL    / 1000, 2),
+    totalHL:     r(totalHL      / 1000, 1),
   };
 }
 
@@ -955,6 +1055,10 @@ function addLayer() {
   const kind     = 'extension';
   const name     = suggestLayerName(kind);
   const newLayer = createLayer(name, kind, 0);
+  // CHANGE 2: Inherit current global building settings so the new layer starts
+  // with the same height as the user last set in the Building panel.
+  newLayer.storeys       = state.storeys;
+  newLayer.ceilingHeight = state.ceilingHeight;
   state.layers.push(newLayer);
   selectLayer(newLayer.id);
 }
@@ -1056,6 +1160,9 @@ function duplicateLayer(layerId) {
   copy.points = src.points.map(p => ({ ...p }));
   copy.closed = src.closed;
   copy.edges  = src.edges.map(e => ({ ...e }));
+  // CHANGE 2: preserve the source layer's per-layer height
+  copy.storeys       = src.storeys;
+  copy.ceilingHeight = src.ceilingHeight;
   state.layers.push(copy);
   selectLayer(copy.id);
 }
@@ -1079,6 +1186,9 @@ function createUpperFloorFromLayer(layerId) {
   copy.points = src.points.map(p => ({ ...p }));
   copy.closed = src.closed;
   copy.edges  = src.edges.map(e => ({ ...e }));
+  // CHANGE 2: upper floor inherits the same ceiling height as the source layer
+  copy.storeys       = src.storeys;
+  copy.ceilingHeight = src.ceilingHeight;
   state.layers.push(copy);
   selectLayer(copy.id);
 }
@@ -1092,6 +1202,9 @@ function createReferenceFromLayer(layerId) {
   copy.points  = src.points.map(p => ({ ...p }));
   copy.closed  = src.closed;
   copy.edges   = src.edges.map(e => ({ ...e }));
+  // CHANGE 2: preserve per-layer height from source
+  copy.storeys       = src.storeys;
+  copy.ceilingHeight = src.ceilingHeight;
   copy.visible = true;
   state.layers.push(copy);
   selectLayer(copy.id);
@@ -1175,6 +1288,18 @@ function renderLayerPanel() {
     if (kindSelect) kindSelect.value = active.kind;
     if (levelInput) levelInput.value = active.level;
     if (removeBtn)  removeBtn.disabled = state.layers.length <= 1;
+
+    // CHANGE 2: populate per-layer height controls
+    const layerStoreysGroup = document.getElementById('layerStoreysGroup');
+    if (layerStoreysGroup) {
+      layerStoreysGroup.querySelectorAll('.choice-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.value, 10) === active.storeys);
+      });
+    }
+    const layerCeilingHeight = document.getElementById('layerCeilingHeight');
+    if (layerCeilingHeight && document.activeElement !== layerCeilingHeight) {
+      layerCeilingHeight.value = active.ceilingHeight;
+    }
   } else {
     editPanel.hidden = true;
   }
@@ -1276,6 +1401,27 @@ document.getElementById('layerKindSelect').addEventListener('change', function (
 document.getElementById('layerLevelInput').addEventListener('change', function () {
   const active = getActiveLayer();
   if (active) setLayerLevel(active.id, this.value);
+});
+
+// CHANGE 2: per-layer storeys — each layer has its own independent storey count
+document.querySelectorAll('#layerStoreysGroup .choice-btn').forEach(btn => {
+  btn.addEventListener('click', function () {
+    const active = getActiveLayer();
+    if (!active) return;
+    document.querySelectorAll('#layerStoreysGroup .choice-btn')
+      .forEach(b => b.classList.remove('active'));
+    this.classList.add('active');
+    active.storeys = parseInt(this.dataset.value, 10);
+    updateResults();
+  });
+});
+
+// CHANGE 2: per-layer ceiling height — independent of every other layer
+document.getElementById('layerCeilingHeight').addEventListener('input', function () {
+  const active = getActiveLayer();
+  if (!active) return;
+  const v = parseFloat(this.value);
+  if (v >= 2.0 && v <= 4.0) { active.ceilingHeight = v; updateResults(); }
 });
 
 document.getElementById('duplicateLayerBtn').addEventListener('click', () => {
