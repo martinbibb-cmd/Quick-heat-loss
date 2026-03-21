@@ -3,7 +3,7 @@
  * Cache-first strategy for offline support.
  */
 
-const CACHE = 'quick-heat-loss-v2';
+const CACHE = 'quick-heat-loss-v3';
 
 const ASSETS = [
   './',
