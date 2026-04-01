@@ -37,10 +37,18 @@ const U_FLOOR = {
   insulated:            0.20,
 };
 
+// Intermediate floor/ceiling between heated flats (W/m²K)
+const U_INT_FLOOR = {
+  timber:    0.35,  // Uninsulated timber intermediate floor
+  concrete:  0.25,  // Concrete slab (common in flats)
+  insulated: 0.15,  // Insulated intermediate floor
+};
+
 // Glazing as fraction of gross exposed wall area
 const GLAZING_FRACTION = { low: 0.12, medium: 0.18, high: 0.25 };
 
 const PARTY_WALL_FACTOR = 0.1; // residual heat loss through party walls
+const INT_FLOOR_FACTOR  = 0.5; // residual heat loss through intermediate floors between heated flats
 
 const DELTA_T = 20;  // °C design temperature difference
 const ACH     = 0.75; // air changes per hour (typical UK existing dwelling)
@@ -126,6 +134,7 @@ const state = {
   glazingType:    'doubleArated',
   glazingAmount:  'medium',
   floorType:      'suspendedUninsulated',
+  intFloorType:   'concrete',
 };
 
 // ── Canvas setup ──────────────────────────────────────────────────────────────
@@ -231,7 +240,7 @@ function applyDefaultExposure(layer) {
 
   if (type === 'semi' || type === 'endTerrace') {
     layer.edges[sorted[0].i].isPartyWall = true;
-  } else if (type === 'midTerrace') {
+  } else if (type === 'midTerrace' || type === 'flatGround' || type === 'flatMid' || type === 'flatPenthouse') {
     layer.edges[sorted[0].i].isPartyWall = true;
     if (sorted.length > 1) layer.edges[sorted[1].i].isPartyWall = true;
   }
@@ -897,13 +906,28 @@ function calculateLayerHeatLoss(layer, sharedEdgeIndices) {
   const uLoft    = U_LOFT[state.loftInsulation];
   const uGlazing = U_GLAZING[state.glazingType];
   const uFloor   = U_FLOOR[state.floorType];
+  const uIntFloor = U_INT_FLOOR[state.intFloorType];
+
+  // Determine flat position for conditional floor/roof heat loss
+  const dwType         = state.dwellingType;
+  const isFlatGround   = dwType === 'flatGround';
+  const isFlatMid      = dwType === 'flatMid';
+  const isFlatPenthouse = dwType === 'flatPenthouse';
 
   // Exposed wall + small residual through party walls
   const partyWallArea = partyPerimeter * totalHeight;
   const wallHL    = (netWallArea * uWall + partyWallArea * uWall * PARTY_WALL_FACTOR) * DELTA_T;
   const glazingHL = glazingArea  * uGlazing * DELTA_T;
-  const roofHL    = roofArea     * uLoft    * DELTA_T;
-  const floorHL   = floorArea    * uFloor   * DELTA_T;
+
+  // Roof heat loss: exposed for houses and penthouse; intermediate for ground/mid flats
+  const roofHL = (isFlatGround || isFlatMid)
+    ? roofArea * uIntFloor * INT_FLOOR_FACTOR * DELTA_T
+    : roofArea * uLoft * DELTA_T;
+
+  // Floor heat loss: exposed for houses and ground-floor flats; intermediate for mid/penthouse flats
+  const floorHL = (isFlatMid || isFlatPenthouse)
+    ? floorArea * uIntFloor * INT_FLOOR_FACTOR * DELTA_T
+    : floorArea * uFloor * DELTA_T;
   const ventHL    = volume * ACH * 0.33 * DELTA_T; // 0.33 Wh/m³K · s/h conversion
 
   return { floorArea, perimeter, netWallArea, glazingArea, roofArea, volume,
@@ -1342,6 +1366,28 @@ document.addEventListener('keydown', e => {
 });
 
 // ── Setting controls ──────────────────────────────────────────────────────────
+
+/**
+ * Show/hide fabric fields that depend on whether the dwelling is a flat
+ * and which floor position it occupies.
+ */
+function updateFlatUI() {
+  const type            = state.dwellingType;
+  const isFlatGround    = type === 'flatGround';
+  const isFlatMid       = type === 'flatMid';
+  const isFlatPenthouse = type === 'flatPenthouse';
+  const isFlat          = isFlatGround || isFlatMid || isFlatPenthouse;
+
+  // Ground floor selector: only relevant for dwellings with an exposed ground floor
+  document.getElementById('groundFloorGroup').hidden = isFlatMid || isFlatPenthouse;
+
+  // Loft insulation: only relevant for dwellings with an exposed roof
+  document.getElementById('loftGroup').hidden = isFlatGround || isFlatMid;
+
+  // Intermediate floor/ceiling: only relevant for flats
+  document.getElementById('intFloorGroup').hidden = !isFlat;
+}
+
 function wireChoiceGroup(groupId, stateKey, transform, postChange) {
   document.querySelectorAll(`#${groupId} .choice-btn`).forEach(btn => {
     btn.addEventListener('click', function () {
@@ -1362,7 +1408,7 @@ document.getElementById('ceilingHeight').addEventListener('input', function () {
   if (v >= 2.0 && v <= 4.0) { state.ceilingHeight = v; updateResults(); }
 });
 
-['wallType', 'loftInsulation', 'glazingType', 'floorType']
+['wallType', 'loftInsulation', 'glazingType', 'floorType', 'intFloorType']
   .forEach(id => {
     document.getElementById(id).addEventListener('change', function () {
       state[id] = this.value;
@@ -1377,6 +1423,7 @@ document.getElementById('dwellingType').addEventListener('change', function () {
     applyDefaultExposure(layer);
     render();
   }
+  updateFlatUI();
   updateResults();
 });
 
@@ -1449,6 +1496,7 @@ resizeObserver.observe(canvas.parentElement);
 updateHint();
 updateButtons();
 renderLayerPanel();
+updateFlatUI();
 
 // Register service worker for offline support
 if ('serviceWorker' in navigator) {

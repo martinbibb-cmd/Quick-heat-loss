@@ -147,6 +147,9 @@
             <option value="semi" selected>Semi-detached</option>
             <option value="endTerrace">End terrace</option>
             <option value="midTerrace">Mid terrace</option>
+            <option value="flatGround">Flat — ground floor</option>
+            <option value="flatMid">Flat — mid floor</option>
+            <option value="flatPenthouse">Flat — penthouse</option>
           </select>
         </div>
       </section>
@@ -167,14 +170,16 @@
           </select>
         </div>
 
-        <div class="field-group">
-          <label for="loftInsulation">Loft insulation</label>
-          <select id="loftInsulation" aria-label="Loft insulation level">
-            <option value="none">None</option>
-            <option value="mm100">100 mm</option>
-            <option value="mm200">200 mm</option>
-            <option value="mm270plus" selected>270 mm+ (recommended)</option>
-          </select>
+        <div id="loftGroup">
+          <div class="field-group">
+            <label for="loftInsulation">Loft insulation</label>
+            <select id="loftInsulation" aria-label="Loft insulation level">
+              <option value="none">None</option>
+              <option value="mm100">100 mm</option>
+              <option value="mm200">200 mm</option>
+              <option value="mm270plus" selected>270 mm+ (recommended)</option>
+            </select>
+          </div>
         </div>
 
         <div class="field-group">
@@ -196,13 +201,26 @@
           </div>
         </div>
 
-        <div class="field-group">
-          <label for="floorType">Ground floor</label>
-          <select id="floorType" aria-label="Ground floor construction">
-            <option value="solidUninsulated">Solid concrete, uninsulated</option>
-            <option value="suspendedUninsulated" selected>Suspended timber, uninsulated</option>
-            <option value="insulated">Insulated (modern)</option>
-          </select>
+        <div id="groundFloorGroup">
+          <div class="field-group">
+            <label for="floorType">Ground floor</label>
+            <select id="floorType" aria-label="Ground floor construction">
+              <option value="solidUninsulated">Solid concrete, uninsulated</option>
+              <option value="suspendedUninsulated" selected>Suspended timber, uninsulated</option>
+              <option value="insulated">Insulated (modern)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="intFloorGroup" hidden>
+          <div class="field-group">
+            <label for="intFloorType">Intermediate floor / ceiling</label>
+            <select id="intFloorType" aria-label="Intermediate floor or ceiling construction">
+              <option value="timber">Uninsulated timber</option>
+              <option value="concrete" selected>Concrete slab</option>
+              <option value="insulated">Insulated</option>
+            </select>
+          </div>
         </div>
       </section>
 
