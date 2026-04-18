@@ -792,6 +792,15 @@ select:focus {
   font-weight: 700;
   color: var(--text);
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insulation-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .wiz-page-sub {
