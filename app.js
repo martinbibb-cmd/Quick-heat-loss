@@ -135,6 +135,10 @@ const state = {
   glazingAmount:  'medium',
   floorType:      'suspendedUninsulated',
   intFloorType:   'concrete',
+
+  // Custom U-values set by wizard (override lookup tables when non-null)
+  customUValues:     null, // { wall, loft, glazing, floor }
+  garageDeductionM2: 0,    // m² of integral garage to deduct from heated floor area
 };
 
 // ── Canvas setup ──────────────────────────────────────────────────────────────
@@ -902,10 +906,10 @@ function calculateLayerHeatLoss(layer, sharedEdgeIndices) {
   const netWallArea   = grossWallArea - glazingArea;
   const roofArea      = floorArea; // top storey ceiling only
 
-  const uWall    = U_WALL[state.wallType];
-  const uLoft    = U_LOFT[state.loftInsulation];
-  const uGlazing = U_GLAZING[state.glazingType];
-  const uFloor   = U_FLOOR[state.floorType];
+  const uWall     = (state.customUValues && state.customUValues.wall    != null) ? state.customUValues.wall    : U_WALL[state.wallType];
+  const uLoft     = (state.customUValues && state.customUValues.loft    != null) ? state.customUValues.loft    : U_LOFT[state.loftInsulation];
+  const uGlazing  = (state.customUValues && state.customUValues.glazing != null) ? state.customUValues.glazing : U_GLAZING[state.glazingType];
+  const uFloor    = (state.customUValues && state.customUValues.floor   != null) ? state.customUValues.floor   : U_FLOOR[state.floorType];
   const uIntFloor = U_INT_FLOOR[state.intFloorType];
 
   // Determine flat position for conditional floor/roof heat loss
@@ -978,7 +982,16 @@ function calculateHeatLoss() {
     totVentHL      += res.ventHL;
   });
 
-  const totalHL = totWallHL + totGlazingHL + totRoofHL + totFloorHL + totVentHL;
+  // Integral garage deduction: proportionally reduce floor/roof/vent contributions
+  if (state.garageDeductionM2 > 0 && totFloorArea > 0) {
+    const frac = Math.min(1, state.garageDeductionM2 / totFloorArea);
+    totFloorArea = Math.max(0, totFloorArea - state.garageDeductionM2);
+    totRoofArea  = Math.max(0, totRoofArea  - state.garageDeductionM2);
+    totVolume    = Math.max(0, totVolume    * (1 - frac));
+    totFloorHL   *= (1 - frac);
+    totRoofHL    *= (1 - frac);
+    totVentHL    *= (1 - frac);
+  }
 
   return {
     floorArea:   r(totFloorArea,   1),
@@ -992,7 +1005,7 @@ function calculateHeatLoss() {
     roofHL:      r(totRoofHL    / 1000, 2),
     floorHL:     r(totFloorHL   / 1000, 2),
     ventHL:      r(totVentHL    / 1000, 2),
-    totalHL:     r(totalHL      / 1000, 1),
+    totalHL:     r((totWallHL + totGlazingHL + totRoofHL + totFloorHL + totVentHL) / 1000, 1),
   };
 }
 
@@ -1488,6 +1501,200 @@ document.getElementById('referenceLayerBtn').addEventListener('click', () => {
 
 document.getElementById('soloLayerBtn').addEventListener('click', showOnlyActiveLayer);
 document.getElementById('showAllLayersBtn').addEventListener('click', showAllLayers);
+
+// ── Wizard ────────────────────────────────────────────────────────────────────
+
+const EXTENSION_TYPES = [
+  { value: 'rear-single', label: 'Rear single storey' },
+  { value: 'rear-double', label: 'Rear two storey' },
+  { value: 'side-return', label: 'Side return' },
+  { value: 'side-single', label: 'Side single storey' },
+  { value: 'side-double', label: 'Side two storey' },
+  { value: 'front',       label: 'Front extension' },
+  { value: 'porch',       label: 'Porch' },
+  { value: 'other',       label: 'Other' },
+];
+
+const wiz = {
+  step:       0,
+  propType:   null,
+  extensions: [],
+  hasGarage:  false,
+};
+
+function wizShowStep(step) {
+  for (let i = 0; i < 4; i++) {
+    document.getElementById(`wizPage${i}`).hidden = (i !== step);
+  }
+  document.getElementById('wizBackBtn').hidden = (step === 0);
+  const nextBtn = document.getElementById('wizNextBtn');
+  nextBtn.textContent = (step === 3) ? '✓ Start drawing' : 'Next →';
+  document.getElementById('wizStepCount').textContent = `Step ${step + 1} of 4`;
+  const bar = document.getElementById('wizProgressBar');
+  if (bar) bar.querySelector('.wiz-progress-fill').style.width = `${(step + 1) * 25}%`;
+  wiz.step = step;
+}
+
+function wizValidateStep(step) {
+  if (step === 0) {
+    const err = document.getElementById('wizErr0');
+    if (!wiz.propType) { err.hidden = false; return false; }
+    err.hidden = true;
+    return true;
+  }
+  if (step === 1) {
+    const wall    = parseFloat(document.getElementById('wizUWall').value);
+    const loft    = parseFloat(document.getElementById('wizULoft').value);
+    const glazing = parseFloat(document.getElementById('wizUGlazing').value);
+    const floor   = parseFloat(document.getElementById('wizUFloor').value);
+    const err     = document.getElementById('wizErr1');
+    if (isNaN(wall) || isNaN(loft) || isNaN(glazing) || isNaN(floor) ||
+        wall <= 0 || loft <= 0 || glazing <= 0 || floor <= 0) {
+      err.hidden = false;
+      return false;
+    }
+    err.hidden = true;
+    return true;
+  }
+  return true; // steps 2 and 3 are optional
+}
+
+function wizRenderExtensions() {
+  const list = document.getElementById('wizExtList');
+  list.innerHTML = '';
+  if (wiz.extensions.length === 0) {
+    list.innerHTML = '<p class="wiz-ext-empty">No extensions added</p>';
+    return;
+  }
+  wiz.extensions.forEach((ext, i) => {
+    const row = document.createElement('div');
+    row.className = 'wiz-ext-row';
+
+    const sel = document.createElement('select');
+    sel.className = 'wiz-ext-select';
+    sel.setAttribute('aria-label', `Extension ${i + 1} type`);
+    EXTENSION_TYPES.forEach(t => {
+      const opt       = document.createElement('option');
+      opt.value       = t.value;
+      opt.textContent = t.label;
+      opt.selected    = (t.value === ext.type);
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function () { wiz.extensions[i].type = this.value; });
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className   = 'btn btn-danger wiz-ext-remove';
+    removeBtn.textContent = '✕';
+    removeBtn.setAttribute('aria-label', 'Remove extension');
+    const capturedIndex = i;
+    removeBtn.addEventListener('click', () => {
+      wiz.extensions.splice(capturedIndex, 1);
+      wizRenderExtensions();
+    });
+
+    row.appendChild(sel);
+    row.appendChild(removeBtn);
+    list.appendChild(row);
+  });
+}
+
+function wizFinish() {
+  // Apply property type
+  state.dwellingType = wiz.propType;
+
+  // Apply custom U-values (no defaults — all entered by user)
+  state.customUValues = {
+    wall:    parseFloat(document.getElementById('wizUWall').value),
+    loft:    parseFloat(document.getElementById('wizULoft').value),
+    glazing: parseFloat(document.getElementById('wizUGlazing').value),
+    floor:   parseFloat(document.getElementById('wizUFloor').value),
+  };
+
+  // Apply garage deduction
+  state.garageDeductionM2 = wiz.hasGarage
+    ? (parseFloat(document.getElementById('wizGarageArea').value) || 0)
+    : 0;
+
+  // Create extension layers (one per extension entry)
+  wiz.extensions.forEach(ext => {
+    const typeLabel = EXTENSION_TYPES.find(t => t.value === ext.type)?.label || 'Extension';
+    const newLayer         = createLayer(typeLabel, 'extension', 0);
+    newLayer.storeys       = 1;
+    newLayer.ceilingHeight = 2.4;
+    state.layers.push(newLayer);
+  });
+
+  // Sync dwelling type dropdown for if/when settings panel is shown
+  const dtEl = document.getElementById('dwellingType');
+  if (dtEl) dtEl.value = state.dwellingType;
+
+  // Apply default party wall exposure to any already-closed layers
+  state.layers.forEach(layer => {
+    if (layer.closed && layer.edges.length > 0) applyDefaultExposure(layer);
+  });
+
+  // Switch to a non-extension layer as active (original footprint)
+  const origLayer = state.layers.find(l => l.kind === 'original');
+  if (origLayer) selectLayer(origLayer.id);
+
+  // Show clean canvas: hide wizard, apply wizard-complete class
+  document.getElementById('wizardOverlay').hidden = true;
+  document.body.classList.add('wizard-complete');
+
+  updateFlatUI();
+  updateResults();
+  renderLayerPanel();
+  render();
+}
+
+// Wizard: property type cards
+document.querySelectorAll('.prop-card').forEach(card => {
+  card.addEventListener('click', function () {
+    document.querySelectorAll('.prop-card').forEach(c => {
+      c.classList.remove('prop-card--active');
+      c.setAttribute('aria-pressed', 'false');
+    });
+    this.classList.add('prop-card--active');
+    this.setAttribute('aria-pressed', 'true');
+    wiz.propType = this.dataset.type;
+    document.getElementById('wizErr0').hidden = true;
+  });
+});
+
+// Wizard: Next / Back navigation
+document.getElementById('wizNextBtn').addEventListener('click', () => {
+  if (!wizValidateStep(wiz.step)) return;
+  if (wiz.step < 3) {
+    wizShowStep(wiz.step + 1);
+  } else {
+    wizFinish();
+  }
+});
+
+document.getElementById('wizBackBtn').addEventListener('click', () => {
+  if (wiz.step > 0) wizShowStep(wiz.step - 1);
+});
+
+// Wizard: Add extension button
+document.getElementById('wizAddExtBtn').addEventListener('click', () => {
+  wiz.extensions.push({ type: 'rear-single' });
+  wizRenderExtensions();
+});
+
+// Wizard: Garage checkbox
+document.getElementById('wizGarageCheck').addEventListener('change', function () {
+  wiz.hasGarage = this.checked;
+  document.getElementById('wizGarageAreaGroup').hidden = !this.checked;
+});
+
+// Settings toggle (after wizard)
+document.getElementById('settingsToggleBtn').addEventListener('click', () => {
+  document.body.classList.toggle('settings-visible');
+  const btn = document.getElementById('settingsToggleBtn');
+  btn.textContent = document.body.classList.contains('settings-visible')
+    ? '✕ Hide settings'
+    : '⚙ Edit settings';
+});
 
 // ── Initialise ────────────────────────────────────────────────────────────────
 const resizeObserver = new ResizeObserver(resizeCanvas);
