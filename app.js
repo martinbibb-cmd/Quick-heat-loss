@@ -1543,13 +1543,12 @@ function wizValidateStep(step) {
     return true;
   }
   if (step === 1) {
-    const wall    = parseFloat(document.getElementById('wizUWall').value);
-    const loft    = parseFloat(document.getElementById('wizULoft').value);
-    const glazing = parseFloat(document.getElementById('wizUGlazing').value);
-    const floor   = parseFloat(document.getElementById('wizUFloor').value);
-    const err     = document.getElementById('wizErr1');
-    if (isNaN(wall) || isNaN(loft) || isNaN(glazing) || isNaN(floor) ||
-        wall <= 0 || loft <= 0 || glazing <= 0 || floor <= 0) {
+    const wallVal    = document.getElementById('wizUWall').value;
+    const loftVal    = document.getElementById('wizULoft').value;
+    const glazingVal = document.getElementById('wizUGlazing').value;
+    const floorVal   = document.getElementById('wizUFloor').value;
+    const err        = document.getElementById('wizErr1');
+    if (!wallVal || !loftVal || !glazingVal || !floorVal) {
       err.hidden = false;
       return false;
     }

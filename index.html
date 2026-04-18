@@ -176,39 +176,62 @@
 
       <!-- Step 2: U-values -->
       <div class="wiz-page" id="wizPage1" hidden>
-        <h3 class="wiz-page-title">Fabric U-values</h3>
-        <p class="wiz-page-sub">Enter the construction U-values in W/m²K — all fields are required</p>
+        <h3 class="wiz-page-title">
+          <span class="insulation-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 24" width="36" height="18" xmlns="http://www.w3.org/2000/svg">
+              <rect width="48" height="24" rx="4" fill="#fce4ec"/>
+              <path d="M2 6 Q8 2 14 6 Q20 10 26 6 Q32 2 38 6 Q44 10 46 6" stroke="#e91e63" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+              <path d="M2 12 Q8 8 14 12 Q20 16 26 12 Q32 8 38 12 Q44 16 46 12" stroke="#e91e63" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+              <path d="M2 18 Q8 14 14 18 Q20 22 26 18 Q32 14 38 18 Q44 22 46 18" stroke="#e91e63" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+            </svg>
+          </span>
+          Fabric U-values
+        </h3>
+        <p class="wiz-page-sub">Select construction U-values in W/m²K — all fields are required</p>
         <div class="wiz-fields">
           <div class="field-group">
             <label for="wizUWall">External walls</label>
-            <div class="input-with-unit">
-              <input type="number" id="wizUWall" class="text-input" min="0.05" max="5" step="0.01" autocomplete="off" aria-required="true">
-              <span class="unit">W/m²K</span>
-            </div>
+            <select id="wizUWall" aria-required="true">
+              <option value="">— select —</option>
+              <option value="2.1">Solid brick (pre-1930) — 2.1 W/m²K</option>
+              <option value="1.7">Solid stone — 1.7 W/m²K</option>
+              <option value="1.5">Cavity, uninsulated (1930–2000) — 1.5 W/m²K</option>
+              <option value="0.5">Cavity, partial-fill insulation — 0.5 W/m²K</option>
+              <option value="0.28">Cavity, full-fill insulation — 0.28 W/m²K</option>
+              <option value="0.25">Timber frame (modern) — 0.25 W/m²K</option>
+            </select>
           </div>
           <div class="field-group">
             <label for="wizULoft">Roof / ceiling</label>
-            <div class="input-with-unit">
-              <input type="number" id="wizULoft" class="text-input" min="0.05" max="5" step="0.01" autocomplete="off" aria-required="true">
-              <span class="unit">W/m²K</span>
-            </div>
+            <select id="wizULoft" aria-required="true">
+              <option value="">— select —</option>
+              <option value="2.3">No insulation — 2.3 W/m²K</option>
+              <option value="0.35">100 mm insulation — 0.35 W/m²K</option>
+              <option value="0.18">200 mm insulation — 0.18 W/m²K</option>
+              <option value="0.13">270 mm+ insulation (recommended) — 0.13 W/m²K</option>
+            </select>
           </div>
           <div class="field-group">
             <label for="wizUGlazing">Glazing</label>
-            <div class="input-with-unit">
-              <input type="number" id="wizUGlazing" class="text-input" min="0.5" max="8" step="0.01" autocomplete="off" aria-required="true">
-              <span class="unit">W/m²K</span>
-            </div>
+            <select id="wizUGlazing" aria-required="true">
+              <option value="">— select —</option>
+              <option value="4.8">Single glazed — 4.8 W/m²K</option>
+              <option value="2.8">Double, pre-2002 — 2.8 W/m²K</option>
+              <option value="1.4">Double, A-rated — 1.4 W/m²K</option>
+              <option value="0.8">Triple glazed — 0.8 W/m²K</option>
+            </select>
           </div>
           <div class="field-group">
             <label for="wizUFloor">Ground floor</label>
-            <div class="input-with-unit">
-              <input type="number" id="wizUFloor" class="text-input" min="0.05" max="5" step="0.01" autocomplete="off" aria-required="true">
-              <span class="unit">W/m²K</span>
-            </div>
+            <select id="wizUFloor" aria-required="true">
+              <option value="">— select —</option>
+              <option value="0.80">Suspended timber, uninsulated — 0.80 W/m²K</option>
+              <option value="0.70">Solid concrete, uninsulated — 0.70 W/m²K</option>
+              <option value="0.20">Insulated (modern) — 0.20 W/m²K</option>
+            </select>
           </div>
         </div>
-        <p class="wiz-error" id="wizErr1" hidden>Please enter valid positive values for all four U-value fields</p>
+        <p class="wiz-error" id="wizErr1" hidden>Please select a U-value for all four fabric elements</p>
       </div>
 
       <!-- Step 3: Extensions -->
