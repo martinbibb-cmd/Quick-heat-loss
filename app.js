@@ -1548,7 +1548,7 @@ function wizValidateStep(step) {
     const glazing = parseFloat(document.getElementById('wizUGlazing').value);
     const floor   = parseFloat(document.getElementById('wizUFloor').value);
     const err     = document.getElementById('wizErr1');
-    if (!wall || !loft || !glazing || !floor ||
+    if (isNaN(wall) || isNaN(loft) || isNaN(glazing) || isNaN(floor) ||
         wall <= 0 || loft <= 0 || glazing <= 0 || floor <= 0) {
       err.hidden = false;
       return false;
@@ -1586,8 +1586,9 @@ function wizRenderExtensions() {
     removeBtn.className   = 'btn btn-danger wiz-ext-remove';
     removeBtn.textContent = '✕';
     removeBtn.setAttribute('aria-label', 'Remove extension');
+    const capturedIndex = i;
     removeBtn.addEventListener('click', () => {
-      wiz.extensions.splice(i, 1);
+      wiz.extensions.splice(capturedIndex, 1);
       wizRenderExtensions();
     });
 
